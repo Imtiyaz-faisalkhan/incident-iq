@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: incident-iq-postgres
+    environment:
+      POSTGRES_DB: incidentiq
+      POSTGRES_USER: incidentiq
+      POSTGRES_PASSWORD: incidentiq
+    ports:
+      - "5432:5432"
+    volumes:
+      - incident-iq-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  incident-iq-postgres-data:
