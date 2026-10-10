@@ -3,6 +3,7 @@ package com.springbootai.incidentiq.exception;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.TypeMismatchException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 import java.util.List;
@@ -27,8 +29,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-    @ExceptionHandler(ServiceNotFoundException.class)
-    ProblemDetail handleNotFound(ServiceNotFoundException e) {
+    @ExceptionHandler({ServiceNotFoundException.class, IncidentNotFoundException.class})
+    ProblemDetail handleNotFound(RuntimeException e) {
         return problem(HttpStatus.NOT_FOUND, "Resource not found", e.getMessage());
     }
 
@@ -37,9 +39,20 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return problem(HttpStatus.CONFLICT, "Duplicate resource", e.getMessage());
     }
 
-    @ExceptionHandler(InvalidServiceException.class)
-    ProblemDetail handleInvalid(InvalidServiceException e) {
+    @ExceptionHandler({InvalidServiceException.class, InvalidIncidentException.class, InvalidPageRequestException.class})
+    ProblemDetail handleInvalid(RuntimeException e) {
         return problem(HttpStatus.BAD_REQUEST, "Invalid request", e.getMessage());
+    }
+
+    @ExceptionHandler(InvalidIncidentStateException.class)
+    ProblemDetail handleInvalidState(InvalidIncidentStateException e) {
+        return problem(HttpStatus.CONFLICT, "Invalid state transition", e.getMessage());
+    }
+
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    ProblemDetail handleConcurrentModification(OptimisticLockingFailureException e) {
+        return problem(HttpStatus.CONFLICT, "Concurrent modification",
+                "The resource was modified by another request; reload it and try again");
     }
 
     @ExceptionHandler(Exception.class)
@@ -56,6 +69,21 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 .map(error -> Map.of(
                         "field", error.getField(),
                         "message", String.valueOf(error.getDefaultMessage())))
+                .toList();
+        problem.setProperty("errors", errors);
+        return handleExceptionInternal(e, problem, headers, status, request);
+    }
+
+    /** Constraint violations on query/path parameters, in the same shape as body validation errors. */
+    @Override
+    protected ResponseEntity<Object> handleHandlerMethodValidationException(
+            HandlerMethodValidationException e, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+        ProblemDetail problem = problem(HttpStatus.BAD_REQUEST, "Invalid request", "One or more parameters are invalid");
+        List<Map<String, String>> errors = e.getParameterValidationResults().stream()
+                .flatMap(result -> result.getResolvableErrors().stream()
+                        .map(error -> Map.of(
+                                "field", String.valueOf(result.getMethodParameter().getParameterName()),
+                                "message", String.valueOf(error.getDefaultMessage()))))
                 .toList();
         problem.setProperty("errors", errors);
         return handleExceptionInternal(e, problem, headers, status, request);
